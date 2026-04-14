@@ -1,0 +1,2 @@
+# MotionMaster_NivritiSingh
+THIS PROJECT IS BASED ON SMART CAR PARKING . 

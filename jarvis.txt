@@ -1,0 +1,207 @@
+#include <Keypad.h>
+#include <Servo.h>
+#include <LiquidCrystal.h>
+
+// ---------------- LCD ----------------
+LiquidCrystal lcd(A1, A2, A3, A4, A5, 0);
+
+// ---------------- SERVO ----------------
+Servo gateServo;
+
+// ---------------- ULTRASONIC ----------------
+#define trig1 2   // Entry side sensor
+#define echo1 3
+#define trig2 4   // Exit side sensor
+#define echo2 5
+
+// ---------------- KEYPAD ----------------
+const byte ROWS = 4;
+const byte COLS = 4;
+
+char keys[ROWS][COLS] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+
+byte rowPins[ROWS] = {7, 8, 9, 10};
+byte colPins[COLS] = {11, 12, 13, A0};
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+// ---------------- PASSWORD ----------------
+String correctPassword = "D582";
+String enteredPassword = "";
+
+// ---------------- PARKING ----------------
+int totalSlots = 4;
+int availableSlots = 4;
+
+// ---------------- CONTROL ----------------
+bool allowExit = true;
+bool exitReady = false;
+
+// ---------------- FUNCTIONS ----------------
+long getDistance(int trig, int echo) {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(trig, LOW);
+
+  long duration = pulseIn(echo, HIGH, 30000);
+
+  if (duration == 0) return 100; // no object detected
+
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+void showSlots() {
+  lcd.clear();
+
+  if (availableSlots == 0) {
+    lcd.setCursor(0, 0);
+    lcd.print("PARKING FULL");
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("Slots Left:");
+    lcd.setCursor(0, 1);
+    lcd.print(availableSlots);
+  }
+}
+
+// ---------------- SETUP ----------------
+void setup() {
+  pinMode(trig1, OUTPUT);
+  pinMode(echo1, INPUT);
+
+  pinMode(trig2, OUTPUT);
+  pinMode(echo2, INPUT);
+
+  gateServo.attach(6);
+  gateServo.write(0); // gate closed
+
+  lcd.begin(16, 2);
+  lcd.print("Smart Parking");
+  delay(2000);
+
+  showSlots();
+}
+
+// ---------------- LOOP ----------------
+void loop() {
+  long dist1 = getDistance(trig1, echo1); // sensor1
+  long dist2 = getDistance(trig2, echo2); // sensor2
+
+  // ================= ENTRY =================
+  if (dist1 > 0 && dist1 < 15) {
+
+    if (availableSlots == 0) {
+      lcd.clear();
+      lcd.print("Parking Full");
+      delay(2000);
+      showSlots();
+      return;
+    }
+
+    lcd.clear();
+    lcd.print("Enter Pass:");
+    enteredPassword = "";
+
+    while (enteredPassword.length() < 4) {
+      char key = keypad.getKey();
+
+      if (key) {
+        enteredPassword += key;
+        lcd.setCursor(0, 1);
+        lcd.print(enteredPassword);
+      }
+    }
+
+    if (enteredPassword == correctPassword) {
+      allowExit = false;
+      exitReady = false;
+
+      lcd.clear();
+      lcd.print("Access Granted");
+
+      gateServo.write(90); // OPEN
+      delay(1000);
+
+      // Wait for car to reach sensor2
+      while (true) {
+        long entryCheck = getDistance(trig2, echo2);
+
+        if (entryCheck > 0 && entryCheck < 15) {
+          availableSlots--;
+
+          lcd.clear();
+          lcd.print("Car Entered");
+          delay(1000);
+          break;
+        }
+      }
+
+      lcd.clear();
+      lcd.print("Closing Gate");
+      gateServo.write(0); // CLOSE
+      delay(1000);
+
+      allowExit = true;
+      showSlots();
+      delay(1000);
+    }
+    else {
+      lcd.clear();
+      lcd.print("Wrong Pass");
+      delay(2000);
+      showSlots();
+    }
+  }
+
+  // ================= EXIT READY =================
+  if (allowExit && dist2 > 20) {
+    exitReady = true;
+  }
+
+  // ================= EXIT =================
+  if (allowExit && exitReady && dist2 > 0 && dist2 < 15) {
+
+    if (availableSlots < totalSlots) {
+
+      exitReady = false;
+
+      lcd.clear();
+      lcd.print("Exit Opening");
+
+      gateServo.write(90); // OPEN
+      delay(1000);
+
+      // Wait until car reaches sensor1
+      while (true) {
+        long exitCheck = getDistance(trig1, echo1);
+
+        if (exitCheck > 0 && exitCheck < 15) {
+          availableSlots++;
+
+          lcd.clear();
+          lcd.print("Car Exited");
+          delay(1000);
+          break;
+        }
+      }
+
+      lcd.clear();
+      lcd.print("Closing Gate");
+      gateServo.write(0); // CLOSE
+      delay(1000);
+
+      showSlots();
+      delay(1000);
+    }
+  }
+}
